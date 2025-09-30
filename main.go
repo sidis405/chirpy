@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -309,7 +310,21 @@ func main() {
 			chirps = append(chirps, dbChirpToChirpStruct(chirp))
 		}
 
+		sortOrder := strings.ToLower(r.URL.Query().Get("sort"))
+
+		switch sortOrder {
+		case "asc":
+			sort.Slice(chirps, func(i, j int) bool {
+				return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+			})
+		case "desc":
+			sort.Slice(chirps, func(i, j int) bool {
+				return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+			})
+		}
+
 		respondWithJson(w, 200, chirps)
+		return
 	})
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 
