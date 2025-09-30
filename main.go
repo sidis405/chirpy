@@ -26,6 +26,7 @@ const port = "8080"
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	secret         string
 }
 
 type User struct {
@@ -33,6 +34,7 @@ type User struct {
 	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Token     string    `json:"token,omitempty"`
 }
 
 type Chirp struct {
@@ -73,6 +75,7 @@ func main() {
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		db:             database.New(db),
+		secret:         os.Getenv("SECRET"),
 	}
 
 	mux := http.NewServeMux()
@@ -85,12 +88,18 @@ func main() {
 
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
+			Email            string `json:"email"`
+			Password         string `json:"password"`
+			ExpiresInSeconds int    `json:"expires_in_seconds"`
 		}
 		params := parameters{}
 		decoder := json.NewDecoder(r.Body)
 		err := decoder.Decode(&params)
+
+		if params.ExpiresInSeconds == 0 || params.ExpiresInSeconds > 3600 {
+			params.ExpiresInSeconds = 3600
+		}
+
 		if err != nil {
 			respondWithError(w, 500, "cannot unmarshal data")
 			return
@@ -112,15 +121,21 @@ func main() {
 			return
 		}
 
+		token, err := auth.MakeJWT(user.ID, apiCfg.secret, time.Duration(params.ExpiresInSeconds)*time.Second)
+
+		if err != nil {
+			respondWithError(w, 401, fmt.Sprintf("%q", err))
+		}
+
 		respondWithJson(w, 200, User{
 			ID:        user.ID,
 			Email:     user.Email,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
+			Token:     token,
 		})
 		return
 	})
-
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Email    string `json:"email"`
@@ -157,28 +172,32 @@ func main() {
 		return
 	})
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "missing token")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, 401, "invalid token")
+			return
+		}
+
 		type parameters struct {
-			Body   string `json:"body"`
-			UserID string `json:"user_id"`
+			Body string `json:"body"`
 		}
 		params := parameters{}
 		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&params)
+		err = decoder.Decode(&params)
 		if err != nil {
 			respondWithError(w, 500, "cannot unmarshal data")
 			return
 		}
-
-		userUuid, err := uuid.Parse(params.UserID)
-		if err != nil {
-			respondWithError(w, 400, "user is not valid uuid")
-			log.Printf(fmt.Sprintf("%q", err))
-			return
-		}
-
 		chirp, err := apiCfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 			Body:   params.Body,
-			UserID: userUuid,
+			UserID: userID,
 		})
 
 		respondWithJson(w, 201, dbChirpToChirpStruct(chirp))
