@@ -231,6 +231,53 @@ func main() {
 		})
 		return
 	})
+
+	mux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "missing token")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, 401, "invalid token")
+			return
+		}
+
+		type parameters struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		params := parameters{}
+		decoder := json.NewDecoder(r.Body)
+		err = decoder.Decode(&params)
+		if err != nil {
+			respondWithError(w, 500, "cannot unmarshal data")
+			return
+		}
+
+		hashedPassword, err := auth.HashPassword(params.Password)
+		if err != nil {
+			respondWithError(w, 500, "hashing error")
+			return
+		}
+
+		user, err := apiCfg.db.UpdateUser(r.Context(), database.UpdateUserParams{
+			ID:             userID,
+			Email:          params.Email,
+			HashedPassword: hashedPassword,
+		})
+
+		respondWithJson(w, 200, User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email,
+		})
+		return
+	})
+
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 
 		token, err := auth.GetBearerToken(r.Header)
