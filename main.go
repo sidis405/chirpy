@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
+	"strings"
 	"sync/atomic"
 )
 
@@ -51,55 +53,38 @@ func main() {
 			Body string `json:"body"`
 		}
 
-		type errResponse struct {
-			Error string `json:"error"`
-		}
-
 		decoder := json.NewDecoder(r.Body)
 		params := parameters{}
 		err := decoder.Decode(&params)
 		if err != nil {
-			resBody := errResponse{Error: "Something went wrong"}
-			data, err := json.Marshal(resBody)
-			if err != nil {
-				log.Printf("Error mashalling JSON: %s", err)
-				w.WriteHeader(500)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(500)
-			w.Write(data)
+			respondWithError(w, 500, "Something went wrong")
 			return
 		}
 
 		if len(params.Body) > 140 {
-			resBody := errResponse{Error: "Chirp is too long"}
-			data, err := json.Marshal(resBody)
-			if err != nil {
-				log.Printf("Error mashalling JSON: %s", err)
-				w.WriteHeader(500)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(400)
-			w.Write(data)
+			respondWithError(w, 400, "Chirp is too long")
 			return
 		}
 
 		type okResponse struct {
-			Valid bool `json:"valid"`
+			CleanedBody string `json:"cleaned_body"`
 		}
 
-		resBody := okResponse{Valid: true}
-		data, err := json.Marshal(resBody)
-		if err != nil {
-			log.Printf("Error mashalling JSON: %s", err)
-			w.WriteHeader(500)
-			return
+		// redacting stuff
+		words := strings.Split(params.Body, " ")
+		var out []string
+		bad := []string{
+			"kerfuffle", "sharbert", "fornax",
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		w.Write(data)
+		for _, word := range words {
+			if slices.Contains(bad, strings.ToLower(word)) {
+				out = append(out, "****")
+			} else {
+				out = append(out, word)
+			}
+		}
+
+		respondWithJson(w, 200, okResponse{CleanedBody: strings.Join(out, " ")})
 		return
 	})
 
@@ -119,4 +104,34 @@ func main() {
 
 	log.Printf("Serving files from %s on port: %s\n", filePathRoot, port)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	type errResponse struct {
+		Error string `json:"error"`
+	}
+
+	resBody := errResponse{Error: msg}
+	data, err := json.Marshal(resBody)
+	if err != nil {
+		log.Printf("Error mashalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(data)
+	return
+}
+
+func respondWithJson(w http.ResponseWriter, code int, payload interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error mashalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(data)
 }
