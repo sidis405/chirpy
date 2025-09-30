@@ -195,7 +195,6 @@ func main() {
 		respondWithJson(w, 204, nil)
 		return
 	})
-
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Email    string `json:"email"`
@@ -231,7 +230,6 @@ func main() {
 		})
 		return
 	})
-
 	mux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, r *http.Request) {
 		token, err := auth.GetBearerToken(r.Header)
 		if err != nil {
@@ -277,7 +275,6 @@ func main() {
 		})
 		return
 	})
-
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 
 		token, err := auth.GetBearerToken(r.Header)
@@ -340,6 +337,48 @@ func main() {
 		}
 
 		respondWithJson(w, 200, dbChirpToChirpStruct(chirp))
+		return
+	})
+
+	mux.HandleFunc("DELETE /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "missing token")
+			return
+		}
+
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, 401, "invalid token")
+			return
+		}
+
+		id := r.PathValue("id")
+
+		chirpId, err := uuid.Parse(id)
+		if err != nil {
+			respondWithError(w, 401, "invalid chirp uuid")
+		}
+
+		chirp, err := apiCfg.db.GetChirp(r.Context(), chirpId)
+		if err != nil {
+			respondWithError(w, 404, "not found")
+			return
+		}
+
+		if chirp.UserID != userID {
+			respondWithError(w, 403, "unauthorized")
+			return
+		}
+
+		err = apiCfg.db.DeleteChirp(r.Context(), chirpId)
+
+		if err != nil {
+			respondWithError(w, 500, "cannot delete chirp")
+		}
+
+		respondWithJson(w, 204, nil)
+
 		return
 	})
 
