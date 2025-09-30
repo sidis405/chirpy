@@ -30,11 +30,12 @@ type apiConfig struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Token     string    `json:"token,omitempty"`
+	ID           uuid.UUID `json:"id"`
+	Email        string    `json:"email"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Token        string    `json:"token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
 }
 
 type Chirp struct {
@@ -88,17 +89,12 @@ func main() {
 
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
-			Email            string `json:"email"`
-			Password         string `json:"password"`
-			ExpiresInSeconds int    `json:"expires_in_seconds"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
 		}
 		params := parameters{}
 		decoder := json.NewDecoder(r.Body)
 		err := decoder.Decode(&params)
-
-		if params.ExpiresInSeconds == 0 || params.ExpiresInSeconds > 3600 {
-			params.ExpiresInSeconds = 3600
-		}
 
 		if err != nil {
 			respondWithError(w, 500, "cannot unmarshal data")
@@ -121,21 +117,85 @@ func main() {
 			return
 		}
 
-		token, err := auth.MakeJWT(user.ID, apiCfg.secret, time.Duration(params.ExpiresInSeconds)*time.Second)
+		token, err := auth.MakeJWT(user.ID, apiCfg.secret)
 
 		if err != nil {
 			respondWithError(w, 401, fmt.Sprintf("%q", err))
 		}
 
+		refreshTokenString, err := auth.MakeRefreshToken()
+
+		if err != nil {
+			respondWithError(w, 401, fmt.Sprintf("%q", err))
+		}
+
+		refreshToken, err := apiCfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+			Token:     refreshTokenString,
+			UserID:    user.ID,
+			ExpiresAt: time.Now().Add(time.Duration(24*60) * time.Hour),
+		})
+
 		respondWithJson(w, 200, User{
-			ID:        user.ID,
-			Email:     user.Email,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Token:     token,
+			ID:           user.ID,
+			Email:        user.Email,
+			CreatedAt:    user.CreatedAt,
+			UpdatedAt:    user.UpdatedAt,
+			Token:        token,
+			RefreshToken: refreshToken.Token,
 		})
 		return
 	})
+
+	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 400, "no token found in header")
+			return
+		}
+		refreshToken, err := apiCfg.db.GetRefreshToken(r.Context(), token)
+
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		type tokenResponse struct {
+			Token string `json:"token"`
+		}
+
+		accessToken, err := auth.MakeJWT(refreshToken.UserID, apiCfg.secret)
+
+		if err != nil {
+			respondWithError(w, 500, "cannot generate new access token")
+		}
+
+		respondWithJson(w, 200, tokenResponse{Token: accessToken})
+		return
+	})
+	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 400, "no token found in header")
+			return
+		}
+		refreshToken, err := apiCfg.db.GetRefreshToken(r.Context(), token)
+
+		if err != nil {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		err = apiCfg.db.RevokeRefreshToken(r.Context(), refreshToken.Token)
+
+		if err != nil {
+			respondWithError(w, 500, "cannot revoke token")
+			return
+		}
+
+		respondWithJson(w, 204, nil)
+		return
+	})
+
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
 			Email    string `json:"email"`

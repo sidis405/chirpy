@@ -7,12 +7,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+const tokenDuration = time.Duration(3600) * time.Second
+
+func MakeJWT(userID uuid.UUID, tokenSecret string) (string, error) {
 	signingKey := []byte(tokenSecret)
 	claims := &jwt.RegisteredClaims{
 		Issuer:    "chirpy",
 		Subject:   userID.String(),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(tokenDuration)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
 
