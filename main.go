@@ -29,9 +29,17 @@ type apiConfig struct {
 
 type User struct {
 	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+}
+
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -96,6 +104,50 @@ func main() {
 			Email:     user.Email,
 		})
 		return
+	})
+	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Body   string `json:"body"`
+			UserID string `json:"user_id"`
+		}
+		params := parameters{}
+		decoder := json.NewDecoder(r.Body)
+		err := decoder.Decode(&params)
+		if err != nil {
+			respondWithError(w, 500, "cannot unmarshal data")
+			return
+		}
+
+		userUuid, err := uuid.Parse(params.UserID)
+		if err != nil {
+			respondWithError(w, 400, "user is not valid uuid")
+			log.Printf(fmt.Sprintf("%q", err))
+			return
+		}
+
+		chirp, err := apiCfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+			Body:   params.Body,
+			UserID: userUuid,
+		})
+
+		respondWithJson(w, 201, dbChirpToChirpStruct(chirp))
+
+		return
+	})
+
+	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		rawChirps, err := apiCfg.db.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, 500, "cannot fetch chirps")
+			return
+		}
+		var chirps []Chirp
+
+		for _, chirp := range rawChirps {
+			chirps = append(chirps, dbChirpToChirpStruct(chirp))
+		}
+
+		respondWithJson(w, 200, chirps)
 	})
 
 	mux.HandleFunc("GET /admin/metrics", apiCfg.hitsHandler)
@@ -200,4 +252,14 @@ func respondWithJson(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_, _ = w.Write(data)
+}
+
+func dbChirpToChirpStruct(chirp database.Chirp) Chirp {
+	return Chirp{
+		ID:        chirp.ID,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+	}
 }
