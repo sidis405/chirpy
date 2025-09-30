@@ -150,6 +150,24 @@ func main() {
 		respondWithJson(w, 200, chirps)
 	})
 
+	mux.HandleFunc("GET /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+
+		chirpId, err := uuid.Parse(id)
+		if err != nil {
+			respondWithError(w, 401, "invalid chirp uuid")
+		}
+
+		chirp, err := apiCfg.db.GetChirp(r.Context(), chirpId)
+		if err != nil {
+			respondWithError(w, 404, "not found")
+			return
+		}
+
+		respondWithJson(w, 200, dbChirpToChirpStruct(chirp))
+		return
+	})
+
 	mux.HandleFunc("GET /admin/metrics", apiCfg.hitsHandler)
 	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, r *http.Request) {
 		isDev := os.Getenv("PLATFORM") == "dev"
