@@ -14,7 +14,7 @@ INSERT INTO users (id, email, hashed_password, created_at, updated_at)
 VALUES (
         gen_random_uuid(), $1, $2, NOW(), NOW()
        )
-RETURNING id, email, created_at, updated_at, hashed_password
+RETURNING id, email, created_at, updated_at, hashed_password, is_chirpy_red
 `
 
 type CreateUserParams struct {
@@ -31,6 +31,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }

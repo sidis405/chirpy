@@ -31,6 +31,7 @@ type apiConfig struct {
 
 type User struct {
 	ID           uuid.UUID `json:"id"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 	Email        string    `json:"email"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -142,10 +143,10 @@ func main() {
 			UpdatedAt:    user.UpdatedAt,
 			Token:        token,
 			RefreshToken: refreshToken.Token,
+			IsChirpyRed:  user.IsChirpyRed,
 		})
 		return
 	})
-
 	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, r *http.Request) {
 		token, err := auth.GetBearerToken(r.Header)
 		if err != nil {
@@ -223,10 +224,11 @@ func main() {
 		}
 
 		respondWithJson(w, 201, User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+			ID:          user.ID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		})
 		return
 	})
@@ -268,10 +270,11 @@ func main() {
 		})
 
 		respondWithJson(w, 200, User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+			ID:          user.ID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
+			IsChirpyRed: user.IsChirpyRed,
 		})
 		return
 	})
@@ -339,7 +342,6 @@ func main() {
 		respondWithJson(w, 200, dbChirpToChirpStruct(chirp))
 		return
 	})
-
 	mux.HandleFunc("DELETE /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
 		token, err := auth.GetBearerToken(r.Header)
 		if err != nil {
@@ -379,6 +381,44 @@ func main() {
 
 		respondWithJson(w, 204, nil)
 
+		return
+	})
+
+	mux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Event string `json:"event"`
+			Data  struct {
+				UserId string `json:"user_id"`
+			} `json:"data"`
+		}
+
+		params := parameters{}
+		decoder := json.NewDecoder(r.Body)
+		err := decoder.Decode(&params)
+
+		if err != nil {
+			respondWithError(w, 500, "cannot unmarshal data")
+			return
+		}
+
+		if params.Event != "user.upgraded" {
+			respondWithJson(w, 204, nil)
+			return
+		}
+
+		userUuid, err := uuid.Parse(params.Data.UserId)
+		if err != nil {
+			respondWithError(w, 400, "invalid uuid")
+			return
+		}
+
+		_, err = apiCfg.db.UpgradeUser(r.Context(), userUuid)
+		if err != nil {
+			respondWithError(w, 404, "not found")
+			return
+		}
+
+		respondWithJson(w, 204, nil)
 		return
 	})
 
