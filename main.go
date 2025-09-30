@@ -27,6 +27,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	secret         string
+	polkaApiKey    string
 }
 
 type User struct {
@@ -78,6 +79,7 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		db:             database.New(db),
 		secret:         os.Getenv("SECRET"),
+		polkaApiKey:    os.Getenv("POLKA_KEY"),
 	}
 
 	mux := http.NewServeMux()
@@ -385,6 +387,17 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		apiKey, err := auth.GetAPIKey(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "invalid apikey")
+			return
+		}
+
+		if apiKey != apiCfg.polkaApiKey {
+			respondWithError(w, 401, "invalid apikey")
+			return
+		}
+
 		type parameters struct {
 			Event string `json:"event"`
 			Data  struct {
@@ -394,7 +407,7 @@ func main() {
 
 		params := parameters{}
 		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&params)
+		err = decoder.Decode(&params)
 
 		if err != nil {
 			respondWithError(w, 500, "cannot unmarshal data")
