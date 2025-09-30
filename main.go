@@ -280,6 +280,37 @@ func main() {
 		})
 		return
 	})
+
+	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		authorIdString := r.URL.Query().Get("author_id")
+		var rawChirps []database.Chirp
+		if authorIdString != "" {
+			authorId, err := uuid.Parse(authorIdString)
+			if err != nil {
+				respondWithError(w, 400, "invalid author id")
+				return
+			}
+			rawChirps, err = apiCfg.db.GetAllChirpsForUser(r.Context(), authorId)
+			if err != nil {
+				respondWithError(w, 500, "cannot fetch chirps")
+				return
+			}
+		} else {
+			rawChirps, err = apiCfg.db.GetAllChirps(r.Context())
+			if err != nil {
+				respondWithError(w, 500, "cannot fetch chirps")
+				return
+			}
+		}
+
+		var chirps []Chirp
+
+		for _, chirp := range rawChirps {
+			chirps = append(chirps, dbChirpToChirpStruct(chirp))
+		}
+
+		respondWithJson(w, 200, chirps)
+	})
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 
 		token, err := auth.GetBearerToken(r.Header)
@@ -312,20 +343,6 @@ func main() {
 		respondWithJson(w, 201, dbChirpToChirpStruct(chirp))
 
 		return
-	})
-	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
-		rawChirps, err := apiCfg.db.GetAllChirps(r.Context())
-		if err != nil {
-			respondWithError(w, 500, "cannot fetch chirps")
-			return
-		}
-		var chirps []Chirp
-
-		for _, chirp := range rawChirps {
-			chirps = append(chirps, dbChirpToChirpStruct(chirp))
-		}
-
-		respondWithJson(w, 200, chirps)
 	})
 	mux.HandleFunc("GET /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
