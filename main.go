@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/sidis405/chirpy/internal/auth"
 	"github.com/sidis405/chirpy/internal/database"
 )
 import (
@@ -81,9 +82,11 @@ func main() {
 
 	mux.HandleFunc("GET /api/healthz", handleHealthz)
 	mux.HandleFunc("POST /api/validate_chirp", handleValidateChirp)
-	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
+
+	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
-			Email string `json:"email"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
 		}
 		params := parameters{}
 		decoder := json.NewDecoder(r.Body)
@@ -92,7 +95,55 @@ func main() {
 			respondWithError(w, 500, "cannot unmarshal data")
 			return
 		}
-		user, err := apiCfg.db.CreateUser(r.Context(), params.Email)
+
+		user, err := apiCfg.db.GetUserByEmail(r.Context(), params.Email)
+		if err != nil {
+			respondWithError(w, 500, "error fetching user")
+			return
+		}
+		matchesPwd, err := auth.CheckPasswordHash(params.Password, user.HashedPassword)
+		if err != nil {
+			respondWithError(w, 500, "cannot check pwd")
+			return
+		}
+
+		if !matchesPwd {
+			respondWithError(w, 401, "unauthorized")
+			return
+		}
+
+		respondWithJson(w, 200, User{
+			ID:        user.ID,
+			Email:     user.Email,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+		})
+		return
+	})
+
+	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
+		type parameters struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		params := parameters{}
+		decoder := json.NewDecoder(r.Body)
+		err := decoder.Decode(&params)
+		if err != nil {
+			respondWithError(w, 500, "cannot unmarshal data")
+			return
+		}
+
+		hashedPassword, err := auth.HashPassword(params.Password)
+		if err != nil {
+			respondWithError(w, 500, "hashing error")
+			return
+		}
+
+		user, err := apiCfg.db.CreateUser(r.Context(), database.CreateUserParams{
+			Email:          params.Email,
+			HashedPassword: hashedPassword,
+		})
 		if err != nil {
 			respondWithError(w, 400, fmt.Sprintf("%q", err))
 		}
@@ -134,7 +185,6 @@ func main() {
 
 		return
 	})
-
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		rawChirps, err := apiCfg.db.GetAllChirps(r.Context())
 		if err != nil {
@@ -149,7 +199,6 @@ func main() {
 
 		respondWithJson(w, 200, chirps)
 	})
-
 	mux.HandleFunc("GET /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
