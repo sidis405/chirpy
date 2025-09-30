@@ -1,6 +1,14 @@
 package main
 
 import (
+	"database/sql"
+	"os"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/sidis405/chirpy/internal/database"
+)
+import (
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +22,7 @@ const port = "8080"
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	db             *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -23,14 +32,14 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 }
 
-func (cfg *apiConfig) hitsHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) hitsHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(200)
 	message := fmt.Sprintf("<html>\n  <body>\n    <h1>Welcome, Chirpy Admin</h1>\n    <p>Chirpy has been visited %d times!</p>\n  </body>\n</html>", cfg.fileserverHits.Load())
 	_, _ = w.Write([]byte(message))
 }
 
-func (cfg *apiConfig) resetHitsHandler(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) resetHitsHandler(w http.ResponseWriter, _ *http.Request) {
 	cfg.fileserverHits = atomic.Int32{}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -40,10 +49,20 @@ func (cfg *apiConfig) resetHitsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	_ = godotenv.Load()
+
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		panic(err)
+	}
+
+	apiCfg := apiConfig{
+		fileserverHits: atomic.Int32{},
+		db:             database.New(db),
+	}
+
 	mux := http.NewServeMux()
-
-	apiCfg := apiConfig{fileserverHits: atomic.Int32{}}
-
 	filePathRoot := http.Dir(".")
 	fs := http.FileServer(filePathRoot)
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app/", fs)))
@@ -91,7 +110,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(200)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
 
 	mux.HandleFunc("GET /admin/metrics", apiCfg.hitsHandler)
@@ -120,7 +139,7 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Write(data)
+	_, _ = w.Write(data)
 	return
 }
 
@@ -133,5 +152,5 @@ func respondWithJson(w http.ResponseWriter, code int, payload interface{}) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Write(data)
+	_, _ = w.Write(data)
 }
